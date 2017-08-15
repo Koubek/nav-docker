@@ -31,3 +31,14 @@ $SqlTimeout = "$env:SqlTimeout"
 if ($SqlTimeout -eq "") {
     $SqlTimeout = "300"
 }
+
+$portNavMgtSvc = if ([System.String]::IsNullOrEmpty($env:portNavMgtSvc)) { 7045 } else { $env:portNavMgtSvc }
+$portNavSvc = if ([System.String]::IsNullOrEmpty($env:portNavSvc)) { 7046 } else { $env:portNavSvc }
+$portNavSoapSvc = if ([System.String]::IsNullOrEmpty($env:portNavSoapSvc)) { 7047 } else { $env:portNavSoapSvc } 
+$portNavODataSvc = if ([System.String]::IsNullOrEmpty($env:portNavODataSvc)) { 7048 } else { $env:portNavODataSvc } 
+$portNavDevSvc = if ([System.String]::IsNullOrEmpty($env:portNavDevSvc)) { 7049 } else { $env:portNavDevSvc }
+
+$portNavWebClient = if ([System.String]::IsNullOrEmpty($env:portNavWebClient)) { 80 } else { $env:portNavWebClient }
+$portNavWebClientSsl = if ([System.String]::IsNullOrEmpty($env:portNavWebClientSsl)) { 443 } else { $env:portNavWebClientSsl }
+
+$sslPorts = { $portNavMgtSvc, $portNavSvc, $portNavSoapSvc, $portNavODataSvc, $portNavDevSvc }

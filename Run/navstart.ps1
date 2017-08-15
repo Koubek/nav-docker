@@ -80,10 +80,10 @@ if ($useSSL -eq "") {
 
 if ($servicesUseSSL) {
     $protocol = "https://"
-    $webClientPort = 443
+    $webClientPort = $portNavWebClientSsl
 } else {
     $protocol = "http://"
-    $webClientPort = 80
+    $webClientPort = $portNavWebClient
 }
 
 if ($runningGenericImage -or $runningSpecificImage) {
@@ -228,10 +228,10 @@ if ($runningGenericImage -or $runningSpecificImage -or $buildingImage) {
     $customConfig.SelectSingleNode("//appSettings/add[@key='DatabaseInstance']").Value = $databaseInstance
     $customConfig.SelectSingleNode("//appSettings/add[@key='DatabaseName']").Value = "$databaseName"
     $customConfig.SelectSingleNode("//appSettings/add[@key='ServerInstance']").Value = "NAV"
-    $customConfig.SelectSingleNode("//appSettings/add[@key='ManagementServicesPort']").Value = "7045"
-    $customConfig.SelectSingleNode("//appSettings/add[@key='ClientServicesPort']").Value = "7046"
-    $customConfig.SelectSingleNode("//appSettings/add[@key='SOAPServicesPort']").Value = "7047"
-    $customConfig.SelectSingleNode("//appSettings/add[@key='ODataServicesPort']").Value = "7048"
+    $customConfig.SelectSingleNode("//appSettings/add[@key='ManagementServicesPort']").Value = $portNavMgtSvc
+    $customConfig.SelectSingleNode("//appSettings/add[@key='ClientServicesPort']").Value = $portNavSvc
+    $customConfig.SelectSingleNode("//appSettings/add[@key='SOAPServicesPort']").Value = $portNavSoapSvc
+    $customConfig.SelectSingleNode("//appSettings/add[@key='ODataServicesPort']").Value = $portNavODataSvc
     $customConfig.SelectSingleNode("//appSettings/add[@key='DefaultClient']").Value = "Web"
     $taskSchedulerKeyExists = ($customConfig.SelectSingleNode("//appSettings/add[@key='EnableTaskScheduler']") -ne $null)
     if ($taskSchedulerKeyExists) {
@@ -292,10 +292,10 @@ if ($runningGenericImage -or $runningSpecificImage) {
         $publishFolder = "$webClientFolder\WebPublish"
         Import-Module "$webClientFolder\Scripts\NAVWebClientManagement.psm1"
         if ($servicesUseSSL) {
-            New-NAVWebServerInstance -PublishFolder $publishFolder -WebServerInstance "NAV" -Server "localhost" -ServerInstance "NAV" -ClientServicesCredentialType $Auth -ClientServicesPort "7046" -WebSitePort $webClientPort -AddFirewallException $false -CertificateThumbprint $certificateThumbprint
+            New-NAVWebServerInstance -PublishFolder $publishFolder -WebServerInstance "NAV" -Server "localhost" -ServerInstance "NAV" -ClientServicesCredentialType $Auth -ClientServicesPort $portNavSvc -WebSitePort $webClientPort -AddFirewallException $false -CertificateThumbprint $certificateThumbprint
         }
         else {
-            New-NAVWebServerInstance -PublishFolder $publishFolder -WebServerInstance "NAV" -Server "localhost" -ServerInstance "NAV" -ClientServicesCredentialType $Auth -ClientServicesPort "7046" -WebSitePort $webClientPort -AddFirewallException $false
+            New-NAVWebServerInstance -PublishFolder $publishFolder -WebServerInstance "NAV" -Server "localhost" -ServerInstance "NAV" -ClientServicesCredentialType $Auth -ClientServicesPort $portNavSvc -WebSitePort $webClientPort -AddFirewallException $false
         }
 
         $navsettingsFile = Join-Path $wwwRootPath "nav\navsettings.json"
@@ -313,7 +313,7 @@ if ($runningGenericImage -or $runningSpecificImage) {
             New-NavWebSite -WebClientFolder $WebClientFolder -inetpubFolder (Join-Path $runPath "inetpub") -AppPoolName "NavWebClientAppPool" -SiteName "NavWebClient" -Port $webClientPort -Auth $Auth
         }
         Write-Host "Create NAV Web Server Instance"
-        New-NAVWebServerInstance -Server "localhost" -ClientServicesCredentialType $auth -ClientServicesPort 7046 -ServerInstance "NAV" -WebServerInstance "NAV"
+        New-NAVWebServerInstance -Server "localhost" -ClientServicesCredentialType $auth -ClientServicesPort $portNavSvc -ServerInstance "NAV" -WebServerInstance "NAV"
 
         # Give Everyone access to resources
         $ResourcesFolder = "$WebClientFolder".Replace('C:\Program Files\', 'C:\ProgramData\Microsoft\')
