@@ -1,3 +1,10 @@
+# This script is multi-purpose
+#
+# $buildingImage is true when called during build of specific NAV image (with CRONUS Demo Database and CRONUS license)
+# $restartingInstance is true when called due to Docker restart of a running image
+# $runningGenericImage is true when running a generic image with NAVDVD on share
+# $runningSpecificImage is true when running a specific image (which had buildingImage set true true during image build)
+
 Write-Host "Initializing..."
 
 $runPath = "c:\Run"
@@ -70,14 +77,6 @@ if ($publicFileSharePort -eq "") { $publicFileSharePort = "8080" }
 if ($publicWinClientPort -eq "") { $publicWinClientPort = "7046" }
 if ($publicSoapPort      -eq "") { $publicSoapPort      = "7047" }
 if ($publicODataPort     -eq "") { $publicODataPort     = "7048" }
-
-# This script is multi-purpose
-#
-# $buildingImage is true when called during build of specific NAV image (with CRONUS Demo Database and CRONUS license)
-# $restartingInstance is true when called due to Docker restart of a running image
-# $runningGenericImage is true when running a generic image with NAVDVD on share
-# $runningSpecificImage is true when running a specific image (which had buildingImage set true true during image build)
-#
 
 if ($buildingImage) { Write-Host "Building Image" }
 
