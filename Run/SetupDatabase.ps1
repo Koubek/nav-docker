@@ -1,6 +1,6 @@
 ﻿# INPUT
 #     $bakFile (optional)
-#     $runningGenericImage or $runningSpecificImage (not building or restarting)
+#     $runningSpecificImage (not building or restarting)
 #
 # OUTPUT
 #     $databaseServer
@@ -37,7 +37,7 @@ if ($restartingInstance) {
     $databaseName = "mydatabase"
     $restoreDb = $true
 
-} elseif ($buildingImage -or $runningGenericImage) {
+} elseif ($buildingImage) {
 
     # Restore CRONUS Demo database to databases folder
 

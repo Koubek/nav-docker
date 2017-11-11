@@ -229,7 +229,6 @@ Below you will find a list of the scripts, a description of their responsibility
 When overriding the scripts, there are a number of variables you can/should use. Of the following 4 variables, only one is true at a time and will indicate why the navstart scripts is running.
 -	$buildingImage – this should only be true when you are building a specific image based on the generic image.
 -	$restartingInstance – this variable is true when the script is being run as a result of a restart of the docker instance.
--	$runningGenericImage – this variable is true when you are running the generic image with a shared NAVDVD.
 -	$runningSpecificImage – this variable is true when you are running a specific image.
 The following variables are used to indicate locations of stuff in the image:
 -	$runPath – this variable points to the location of the run folder (C:\RUN)

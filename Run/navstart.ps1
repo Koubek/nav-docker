@@ -2,7 +2,6 @@
 #
 # $buildingImage is true when called during build of specific NAV image (with CRONUS Demo Database and CRONUS license)
 # $restartingInstance is true when called due to Docker restart of a running image
-# $runningGenericImage is true when running a generic image with NAVDVD on share
 # $runningSpecificImage is true when running a specific image (which had buildingImage set true true during image build)
 
 Write-Host "Initializing..."
@@ -93,18 +92,15 @@ if (!$buildingImage) {
     Set-Content -Path $publicDnsNameFile -Value $publicDnsName
 }
 
-$runningGenericImage = (!$restartingInstance) -and (!$buildingImage) -and (!(Test-Path "C:\Program Files\Microsoft Dynamics NAV" -PathType Container))
-if ($runningGenericImage) { Write-Host "Running Generic Image" }
-
-$runningSpecificImage = (!$restartingInstance) -and (!$runningGenericImage) -and (!$buildingImage)
+$runningSpecificImage = (!$restartingInstance) -and (!$buildingImage)
 if ($runningSpecificImage) { Write-Host "Running Specific Image" }
 
-if ($buildingImage + $restartingInstance + $runningGenericImage + $runningSpecificImage -ne 1) {
+if ($buildingImage + $restartingInstance + $runningSpecificImage -ne 1) {
     Write-Error "Cannot determine reason for running script."
     exit 1
 }
 
-if ($runningGenericImage -or $buildingImage) {
+if ($buildingImage) {
     if (!(Test-Path $navDvdPath -PathType Container)) {
         Write-Error "NAVDVD folder not found
 You must map a folder on the host with the NAVDVD content to $navDvdPath"
@@ -121,7 +117,7 @@ set the environment variable ACCEPT_EULA to 'Y' if you accept the agreement."
 }
 
 $containerAge = [System.DateTime]::Now.Subtract((Get-Item "C:\RUN").CreationTime).Days
-if (($runningSpecificImage -or $runningGenericImage -or $buildingImage) -and ($containerAge -gt 90)) {
+if (($runningSpecificImage -or $buildingImage) -and ($containerAge -gt 90)) {
     if ($Accept_outdated -ne "Y") {
         Write-Error "You are trying to run a container which is more than 90 days old.
 Microsoft recommends that you always run the latest version of our containers.
@@ -130,7 +126,7 @@ Set the environment variable ACCEPT_OUTDATED to 'Y' if you want to run this cont
     }
 }
 
-if ($runningGenericImage -or $runningSpecificImage) {
+if ($runningSpecificImage) {
     Write-Host "Using $auth Authentication"
 }
 
@@ -149,7 +145,7 @@ if (($webClient -ne "N") -or ($httpSite -ne "N")) {
 }
 
 # Prerequisites
-if ($runningGenericImage -or $buildingImage) 
+if ($buildingImage) 
 {
     if ($webClient -ne "N") {
         Write-Host "Installing Url Rewrite"
@@ -176,8 +172,8 @@ if ($runningGenericImage -or $buildingImage)
     start-process "$NavDvdPath\Prerequisite Components\Open XML SDK 2.5 for Microsoft Office\OpenXMLSDKv25.msi" -ArgumentList "/quiet /qn /passive" -Wait
 }
 
-# Copy Service Tier in place if we are running a Generic Image or Building a specific image
-if ($runningGenericImage -or $buildingImage) {
+# Copy Service Tier in place if we are building a specific image
+if ($buildingImage) {
     Write-Host "Copy Service Tier Files"
     Copy-Item -Path "$NavDvdPath\ServiceTier\Program Files" -Destination "C:\" -Recurse -Force
     Copy-Item -Path "$NavDvdPath\ServiceTier\System64Folder\NavSip.dll" -Destination "C:\Windows\System32\NavSip.dll" -Force -ErrorAction Ignore
@@ -207,7 +203,7 @@ $clickOnceInstallerToolsFolder = (Get-Item "C:\Program Files (x86)\Microsoft Dyn
 $WebClientFolder = (Get-Item "C:\Program Files\Microsoft Dynamics NAV\*\Web Client")[0]
 $NAVAdministrationScriptsFolder = (Get-Item "$runPath\NAVAdministration").FullName
 
-if ($runningGenericImage -or $buildingImage) {
+if ($buildingImage) {
     # Due to dependencies from finsql.exe, we have to copy hlink.dll and ReportBuilder in place inside the container
     if (!(Test-Path (Join-Path $roleTailoredClientFolder 'hlink.dll'))) {
         Copy-Item -Path (Join-Path $runPath 'Install\hlink.dll') -Destination (Join-Path $roleTailoredClientFolder 'hlink.dll')
@@ -267,7 +263,7 @@ if ($databaseServer -ne 'localhost') {
 }
 
 
-if ($runningGenericImage -or $buildingImage) {
+if ($buildingImage) {
     # run local installers if present
     if (Test-Path "$navDvdPath\Installers" -PathType Container) {
         Get-ChildItem "$navDvdPath\Installers" | Where-Object { $_.PSIsContainer } | % {
@@ -287,7 +283,7 @@ if ($runningGenericImage -or $buildingImage) {
     }
 }
 
-if ($runningGenericImage -or $runningSpecificImage -or $buildingImage) {
+if ($runningSpecificImage -or $buildingImage) {
 
     Write-Host "Modifying NAV Service Tier Config File for Docker"
     $CustomConfigFile =  Join-Path $serviceTierFolder "CustomSettings.config"
@@ -308,7 +304,7 @@ if ($runningGenericImage -or $runningSpecificImage -or $buildingImage) {
     $CustomConfig.Save($CustomConfigFile)
 }
 
-if ($runningGenericImage -or $runningSpecificImage -or $publicDnsNameChanged) {
+if ($runningSpecificImage -or $publicDnsNameChanged) {
 
     # Certificate
     if ($navUseSSL -or $servicesUseSSL) {
@@ -318,12 +314,12 @@ if ($runningGenericImage -or $runningSpecificImage -or $publicDnsNameChanged) {
     . (Get-MyFilePath "SetupConfiguration.ps1")
 }
 
-if ($runningGenericImage -or $runningSpecificImage) {
+if ($runningSpecificImage) {
 
     . (Get-MyFilePath "SetupAddIns.ps1")
 }
 
-if ($runningGenericImage -or $buildingImage) {
+if ($buildingImage) {
     # Creating NAV Service
     Write-Host "Creating NAV Service Tier"
     $serviceCredentials = New-Object System.Management.Automation.PSCredential ("NT AUTHORITY\SYSTEM", (new-object System.Security.SecureString))
@@ -349,7 +345,7 @@ Start-Service -Name $NavServiceName -WarningAction Ignore
 $wwwRootPath = Get-WWWRootPath
 $httpPath = Join-Path $wwwRootPath "http"
 
-if ($runningGenericImage -or $runningSpecificImage -or $publicDnsNameChanged) {
+if ($runningSpecificImage -or $publicDnsNameChanged) {
 
     if ($webClient -ne "N") {
 
@@ -359,7 +355,7 @@ if ($runningGenericImage -or $runningSpecificImage -or $publicDnsNameChanged) {
 
 }
 
-if ($runningGenericImage -or $runningSpecificImage) {
+if ($runningSpecificImage) {
 
     if ($httpSite -ne "N") {
         Write-Host "Creating http download site"
@@ -378,12 +374,12 @@ if ($runningGenericImage -or $runningSpecificImage) {
     . (Get-MyFilePath "SetupNavUsers.ps1")
 }
 
-if (($runningGenericImage -or $runningSpecificImage -or $publicDnsNameChanged) -and ($httpSite -ne "N") -and ($clickOnce -eq "Y")) {
+if (($runningSpecificImage -or $publicDnsNameChanged) -and ($httpSite -ne "N") -and ($clickOnce -eq "Y")) {
     Write-Host "Creating ClickOnce Manifest"
     . (Get-MyFilePath "SetupClickOnce.ps1")
 }
 
-if ($runningGenericImage -or $runningSpecificImage) {
+if ($runningSpecificImage) {
     . (Get-MyFilePath "AdditionalSetup.ps1")
 }
 
