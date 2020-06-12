@@ -13,6 +13,11 @@
 #     "cu":  "<cu ex. cu1>",
 #     "version":  "<version ex. 9.0.43402.0>",
 #     "tags":  "<tags ex. microsoft/dynamics-nav:9.0.43402.0-ltsc2019,microsoft/dynamics-nav:2016-cu1-ltsc2019,microsoft/dynamics-nav:2016-cu1-w1-ltsc2019>",
+#     "storageAccountName": "account name if artifacts should be created"
+#     "storageAccountKey": "account key if artifacts should be created"
+#     "insider": $true/$false
+#     "master": $true/$false
+#     "latest": $true/$false
 # }' | ConvertFrom-Json
 
 cd $PSScriptRoot
