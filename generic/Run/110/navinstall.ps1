@@ -1,3 +1,7 @@
+Param( 
+    [switch] $installOnly
+)
+
 Write-Host "Installing NAV"
 $startTime = [DateTime]::Now
 
@@ -23,14 +27,14 @@ You must map a folder on the host with the NAVDVD content to $navDvdPath"
     exit 1
 }
 
-InstallPrerequisite -Name "Url Rewrite" -MsiPath "$NavDvdPath\Prerequisite Components\IIS URL Rewrite Module\rewrite_2.0_rtw_x64.msi" -MsiUrl "https://download.microsoft.com/download/C/9/E/C9E8180D-4E51-40A6-A9BF-776990D8BCA9/rewrite_amd64.msi"
-InstallPrerequisite -Name "OpenXML" -MsiPath "$NavDvdPath\Prerequisite Components\Open XML SDK 2.5 for Microsoft Office\OpenXMLSDKv25.msi" -MsiUrl "https://download.microsoft.com/download/5/5/3/553C731E-9333-40FB-ADE3-E02DC9643B31/OpenXMLSDKV25.msi"
+InstallPrerequisite -Name "Url Rewrite" -MsiPath "$NavDvdPath\Prerequisite Components\IIS URL Rewrite Module\rewrite_2.0_rtw_x64.msi" -MsiUrl "https://bcartifacts.azureedge.net/prerequisites/rewrite_2.0_rtw_x64.msi"
+InstallPrerequisite -Name "OpenXML" -MsiPath "$NavDvdPath\Prerequisite Components\Open XML SDK 2.5 for Microsoft Office\OpenXMLSDKv25.msi" -MsiUrl "https://bcartifacts.azureedge.net/prerequisites/OpenXMLSDKv25.msi"
 
 if (Test-Path "$NavDvdPath\Prerequisite Components\DotNetCore") {
     $dotnetCoreExe = (Get-ChildItem -Path "$NavDvdPath\Prerequisite Components\DotNetCore" -Filter "*.exe").FullName
 } else {
     Write-Host "Downloading DotNetCore"
-    $dotnetCoreDownloadUrl = "https://go.microsoft.com/fwlink/?LinkID=844461"
+    $dotnetCoreDownloadUrl = "https://bcartifacts.azureedge.net/prerequisites/DotNetCore.1.0.4_1.1.1-WindowsHosting.exe"
     $dotnetCoreExe = "$NavDvdPath\Prerequisite Components\DotNetCore\DotNetCore.1.0.4_1.1.1-WindowsHosting.exe"
     $dotnetCoreFolder = [System.IO.Path]::GetDirectoryName($dotnetCoreExe)
     if (!(Test-Path $dotnetCoreFolder)) {
@@ -115,6 +119,7 @@ Import-Module "$serviceTierFolder\Microsoft.Dynamics.Nav.Management.psm1"
 $databaseServer = "localhost"
 $databaseInstance = "SQLEXPRESS"
 $databaseName = "CRONUS"
+$skipDb = $false
 
 # Restore CRONUS Demo database to databases folder
 if (Test-Path "$navDvdPath\SQLDemoDatabase" -PathType Container) {
@@ -126,9 +131,12 @@ if (Test-Path "$navDvdPath\SQLDemoDatabase" -PathType Container) {
     New-Item -Path $databaseFolder -itemtype Directory -ErrorAction Ignore | Out-Null
     $databaseFile = $bak.FullName
 
-    $collation = (Invoke-Sqlcmd "RESTORE HEADERONLY FROM DISK = '$databaseFile'").Collation
+    Write-Host "Determining Database Collation"
+    $collation = (Invoke-Sqlcmd -ServerInstance localhost\SQLEXPRESS -ConnectionTimeout 300 -QueryTimeOut 300 "RESTORE HEADERONLY FROM DISK = '$databaseFile'").Collation
+
     SetDatabaseServerCollation -collation $collation
-    
+
+    Write-Host "Restoring CRONUS Demo Database"
     New-NAVDatabase -DatabaseServer $databaseServer `
                     -DatabaseInstance $databaseInstance `
                     -DatabaseName "$databaseName" `
@@ -158,6 +166,7 @@ GO
 "@
         Invoke-Sqlcmd -ServerInstance localhost\SQLEXPRESS -QueryTimeOut 0 -ea Stop -Query $attachcmd
     } else {
+        $skipDb = $true
         Write-Host "Skipping restore of Cronus database"
     }
 }
@@ -215,19 +224,21 @@ New-ItemProperty -Path $registryPath -Name 'Installed' -Value 1 -Force | Out-Nul
 
 Install-NAVSipCryptoProvider
 
-if (Test-Path "$navDvdPath\SQLDemoDatabase\CommonAppData\Microsoft\Microsoft Dynamics NAV\*\Database\cronus.flf") {
+if (!$skipDb -and ($installOnly -or (Test-Path "$navDvdPath\SQLDemoDatabase\CommonAppData\Microsoft\Microsoft Dynamics NAV\*\Database\cronus.flf"))) {
     Write-Host "Starting NAV Service Tier"
     Start-Service -Name $NavServiceName -WarningAction Ignore
     
-    Write-Host "Importing CRONUS license file"
-    $licensefile = (Get-Item -Path "$navDvdPath\SQLDemoDatabase\CommonAppData\Microsoft\Microsoft Dynamics NAV\*\Database\cronus.flf").FullName
-    Import-NAVServerLicense -LicenseFile $licensefile -ServerInstance $ServerInstance -Database NavDatabase -WarningAction SilentlyContinue
-    
-    Write-Host "Generating Symbol Reference"
-    $pre = (get-process -Name "finsql" -ErrorAction Ignore) | % { $_.Id }
-    Start-Process -FilePath "$roleTailoredClientFolder\finsql.exe" -ArgumentList "Command=generatesymbolreference, Database=CRONUS, ServerName=localhost\SQLEXPRESS, ntauthentication=1"
-    $procs = get-process -Name "finsql" -ErrorAction Ignore
-    $procs | Where-Object { $pre -notcontains $_.Id } | Wait-Process
+    if (Test-Path "$navDvdPath\SQLDemoDatabase\CommonAppData\Microsoft\Microsoft Dynamics NAV\*\Database\cronus.flf") {
+        Write-Host "Importing CRONUS license file"
+        $licensefile = (Get-Item -Path "$navDvdPath\SQLDemoDatabase\CommonAppData\Microsoft\Microsoft Dynamics NAV\*\Database\cronus.flf").FullName
+        Import-NAVServerLicense -LicenseFile $licensefile -ServerInstance $ServerInstance -Database NavDatabase -WarningAction SilentlyContinue
+        
+        Write-Host "Generating Symbol Reference"
+        $pre = (get-process -Name "finsql" -ErrorAction Ignore) | % { $_.Id }
+        Start-Process -FilePath "$roleTailoredClientFolder\finsql.exe" -ArgumentList "Command=generatesymbolreference, Database=CRONUS, ServerName=localhost\SQLEXPRESS, ntauthentication=1"
+        $procs = get-process -Name "finsql" -ErrorAction Ignore
+        $procs | Where-Object { $pre -notcontains $_.Id } | Wait-Process
+    }
 
     Write-Host "Stopping NAV Service Tier"
     Stop-Service -Name $NavServiceName -WarningAction Ignore

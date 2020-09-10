@@ -590,9 +590,209 @@ function SetDatabaseServerCollation {
     $oldcollation = Get-Content -Path "C:\Run\Collation.txt" -ErrorAction SilentlyContinue
     if ("$oldcollation" -ne "$collation") {
         Write-Host "Changing Database Server Collation to $collation"
-        $tempsapwd = ([Guid]::NewGuid()).ToString()
         $sqlSetupExe = (Get-item "C:\Program Files\Microsoft SQL Server\*\Setup Bootstrap\*\Setup.exe").FullName
-        & $sqlSetupExe /q /ACTION=REBUILDDATABASE /INSTANCENAME=SQLEXPRESS /SQLSYSADMINACCOUNTS='BUILTIN\ADMINISTRATORS' /SAPWD=$tempsapwd /SQLCOLLATION=$collation > $null
+        & $sqlSetupExe /q /ACTION=REBUILDDATABASE /INSTANCENAME=SQLEXPRESS /SQLSYSADMINACCOUNTS='BUILTIN\ADMINISTRATORS' /SQLCOLLATION=$collation > $null
         Set-Content -Path  "C:\Run\Collation.txt" -Value $collation
+    }
+}
+
+function Download-File {
+    Param (
+        [Parameter(Mandatory=$true)]
+        [string] $sourceUrl,
+        [Parameter(Mandatory=$true)]
+        [string] $destinationFile,
+        [switch] $dontOverwrite
+    )
+
+    $replaceUrls = @{
+        "https://go.microsoft.com/fwlink/?LinkID=844461" = "https://bcartifacts.azureedge.net/prerequisites/DotNetCore.1.0.4_1.1.1-WindowsHosting.exe"
+        "https://download.microsoft.com/download/C/9/E/C9E8180D-4E51-40A6-A9BF-776990D8BCA9/rewrite_amd64.msi" = "https://bcartifacts.azureedge.net/prerequisites/rewrite_2.0_rtw_x64.msi"
+        "https://download.microsoft.com/download/5/5/3/553C731E-9333-40FB-ADE3-E02DC9643B31/OpenXMLSDKV25.msi" = "https://bcartifacts.azureedge.net/prerequisites/OpenXMLSDKv25.msi"
+        "https://download.microsoft.com/download/A/1/2/A129F694-233C-4C7C-860F-F73139CF2E01/ENU/x86/ReportViewer.msi" = "https://bcartifacts.azureedge.net/prerequisites/ReportViewer.msi"
+        "https://download.microsoft.com/download/1/3/0/13089488-91FC-4E22-AD68-5BE58BD5C014/ENU/x86/SQLSysClrTypes.msi" = "https://bcartifacts.azureedge.net/prerequisites/SQLSysClrTypes.msi"
+    }
+
+    if ($replaceUrls.ContainsKey($sourceUrl)) {
+        $sourceUrl = $replaceUrls[$sourceUrl]
+    }
+
+    if (Test-Path $destinationFile -PathType Leaf) {
+        if ($dontOverwrite) { 
+            return
+        }
+        Remove-Item -Path $destinationFile -Force
+    }
+    $path = [System.IO.Path]::GetDirectoryName($destinationFile)
+    if (!(Test-Path $path -PathType Container)) {
+        New-Item -Path $path -ItemType Directory -Force | Out-Null
+    }
+    [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+    Write-Host "Downloading $destinationFile"
+    (New-Object System.Net.WebClient).DownloadFile($sourceUrl, $destinationFile)
+}
+
+function Download-Artifacts {
+    Param (
+        [Parameter(Mandatory=$true)]
+        [string] $artifactUrl,
+        [switch] $includePlatform,
+        [switch] $force,
+        [switch] $forceRedirection,
+        [string] $basePath = 'c:\dl'
+    )
+
+    if (-not (Test-Path $basePath)) {
+        New-Item $basePath -ItemType Directory | Out-Null
+    }
+
+    do {
+        $redir = $false
+        $appUri = [Uri]::new($artifactUrl)
+
+        $appArtifactPath = Join-Path $basePath $appUri.AbsolutePath
+        $exists = Test-Path $appArtifactPath
+        if ($exists -and $force) {
+            Remove-Item $appArtifactPath -Recurse -Force
+            $exists = $false
+        }
+        if ($exists -and $forceRedirection) {
+            $appManifestPath = Join-Path $appArtifactPath "manifest.json"
+            $appManifest = Get-Content $appManifestPath | ConvertFrom-Json
+            if ($appManifest.PSObject.Properties.name -eq "applicationUrl") {
+                Remove-Item $appArtifactPath -Recurse -Force
+                $exists = $false
+            }
+        }
+        if (-not $exists) {
+            Write-Host "Downloading application artifact $($appUri.AbsolutePath)"
+            $appZip = Join-Path ([System.IO.Path]::GetTempPath()) "$([Guid]::NewGuid().ToString()).zip"
+            try {
+                Download-File -sourceUrl $artifactUrl -destinationFile $appZip
+            }
+            catch {
+                if ($artifactUrl.Contains('.azureedge.net/')) {
+                    $artifactUrl = $artifactUrl.Replace('.azureedge.net/','.blob.core.windows.net/')
+                    Write-Host "Retrying download..."
+                    Download-File -sourceUrl $artifactUrl -destinationFile $appZip
+                }
+            }
+            Write-Host "Unpacking application artifact"
+            Expand-Archive -Path $appZip -DestinationPath $appArtifactPath -Force
+            Remove-Item -path $appZip -force
+        }
+        Set-Content -Path (Join-Path $appArtifactPath 'lastused') -Value "$([datetime]::UtcNow.Ticks)"
+
+        $appManifestPath = Join-Path $appArtifactPath "manifest.json"
+        $appManifest = Get-Content $appManifestPath | ConvertFrom-Json
+
+        if ($appManifest.PSObject.Properties.name -eq "applicationUrl") {
+            $redir = $true
+            $artifactUrl = $appManifest.ApplicationUrl
+            if ($artifactUrl -notlike 'https://*') {
+                $artifactUrl = "https://$($appUri.Host)/$artifactUrl$($appUri.Query)"
+            }
+        }
+
+    } while ($redir)
+
+    $appArtifactPath
+
+    if ($includePlatform) {
+        if ($appManifest.PSObject.Properties.name -eq "platformUrl") {
+            $platformUrl = $appManifest.platformUrl
+        }
+        else {
+            $platformUrl = "$($appUri.AbsolutePath.Substring(0,$appUri.AbsolutePath.LastIndexOf('/')))/platform".TrimStart('/')
+        }
+    
+        if ($platformUrl -notlike 'https://*') {
+            $platformUrl = "https://$($appUri.Host.TrimEnd('/'))/$platformUrl$($appUri.Query)"
+        }
+        $platformUri = [Uri]::new($platformUrl)
+         
+        $platformArtifactPath = Join-Path $basePath $platformUri.AbsolutePath
+        $exists = Test-Path $platformArtifactPath
+        if ($exists -and $force) {
+            Remove-Item $platformArtifactPath -Recurse -Force
+            $exists = $false
+        }
+        if (-not $exists) {
+            Write-Host "Downloading platform artifact $($platformUri.AbsolutePath)"
+            $platformZip = Join-Path ([System.IO.Path]::GetTempPath()) "$([Guid]::NewGuid().ToString()).zip"
+            try {
+                Download-File -sourceUrl $platformUrl -destinationFile $platformZip
+            }
+            catch {
+                if ($platformUrl.Contains('.azureedge.net/')) {
+                    $platformUrl = $platformUrl.Replace('.azureedge.net/','.blob.core.windows.net/')
+                    Write-Host "Retrying download..."
+                    Download-File -sourceUrl $platformUrl -destinationFile $platformZip
+                }
+            }
+            Write-Host "Unpacking platform artifact"
+            Expand-Archive -Path $platformZip -DestinationPath $platformArtifactPath -Force
+            Remove-Item -path $platformZip -force
+    
+            $prerequisiteComponentsFile = Join-Path $platformArtifactPath "Prerequisite Components.json"
+            if (Test-Path $prerequisiteComponentsFile) {
+                $prerequisiteComponents = Get-Content $prerequisiteComponentsFile | ConvertFrom-Json
+                Write-Host "Downloading Prerequisite Components"
+                $prerequisiteComponents.PSObject.Properties | % {
+                    $path = Join-Path $platformArtifactPath $_.Name
+                    if (-not (Test-Path $path)) {
+                        $dirName = [System.IO.Path]::GetDirectoryName($path)
+                        $filename = [System.IO.Path]::GetFileName($path)
+                        if (-not (Test-Path $dirName)) {
+                            New-Item -Path $dirName -ItemType Directory | Out-Null
+                        }
+                        $url = $_.Value
+                        Download-File -sourceUrl $url -destinationFile $path
+                    }
+                }
+            }
+        }
+        Set-Content -Path (Join-Path $platformArtifactPath 'lastused') -Value "$([datetime]::UtcNow.Ticks)"
+
+        $platformArtifactPath
+    }
+}
+
+function GetTestToolkitApps {
+    Param(
+        [switch] $includeTestLibrariesOnly,
+        [switch] $includeTestFrameworkOnly,
+        [switch] $includePerformanceToolkit
+    )
+
+    # Add Test Framework
+    $apps = @(get-childitem -Path "C:\Applications\TestFramework\TestLibraries\*.*" -recurse -filter "*.app")
+    $apps += @(get-childitem -Path "C:\Applications\TestFramework\TestRunner\*.*" -recurse -filter "*.app")
+
+
+    if (!$includeTestFrameworkOnly) {
+        
+        # Add Test Libraries
+        $apps += "Microsoft_System Application Test Library.app", "Microsoft_Tests-TestLibraries.app" | % {
+            @(get-childitem -Path "C:\Applications\*.*" -recurse -filter $_)
+        }
+
+        if (!$includeTestLibrariesOnly) {
+
+            # Add Tests
+            $apps += @(get-childitem -Path "C:\Applications\*.*" -recurse -filter "Microsoft_Tests-*.app") | Where-Object { $_ -notlike "*\Microsoft_Tests-TestLibraries.app" -and $_ -notlike "*\Microsoft_Tests-Marketing.app" -and $_ -notlike "*\Microsoft_Tests-SINGLESERVER.app" }
+        }
+    }
+
+    if ($includePerformanceToolkit) {
+        $apps += @(get-childitem -Path "C:\Applications\TestFramework\PerformanceToolkit\*.*" -recurse -filter "*.app")
+    }
+
+    $apps | % {
+        $appFile = Get-ChildItem -path "c:\applications.*\*.*" -recurse -filter ($_.Name).Replace(".app","_*.app")
+        if (!($appFile)) {
+            $appFile = $_
+        }
+        $appFile
     }
 }

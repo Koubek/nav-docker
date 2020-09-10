@@ -61,6 +61,9 @@ if ($restartingInstance) {
         if ($roleTailoredClientFolder -and (Test-Path "$roleTailoredClientFolder\finsql.exe")) {
             Start-Process -FilePath "$roleTailoredClientFolder\finsql.exe" -ArgumentList "Command=upgradedatabase, Database=$databaseName, ServerName=$databaseServerInstance, ntauthentication=1, logFile=c:\run\errorlog.txt" -Wait
         }
+        else {
+            Invoke-NAVApplicationDatabaseConversion -databaseServer $databaseServerInstance -databaseName $databaseName -Force | Out-Null
+        }
     } else {
         New-NAVDatabase -DatabaseServer $databaseServer `
                         -DatabaseInstance $databaseInstance `
@@ -71,6 +74,9 @@ if ($restartingInstance) {
 
         if ($roleTailoredClientFolder -and (Test-Path "$roleTailoredClientFolder\finsql.exe")) {
             Start-Process -FilePath "$roleTailoredClientFolder\finsql.exe" -ArgumentList "Command=upgradedatabase, Database=$databaseName, ServerName=$databaseServerInstance, ntauthentication=1, logFile=c:\run\errorlog.txt" -Wait
+        }
+        else {
+            Invoke-NAVApplicationDatabaseConversion -databaseServer $databaseServerInstance -databaseName "tenant" -force | Out-Null
         }
 
         Write-Host "Exporting Application to $DatabaseName"
@@ -83,6 +89,13 @@ if ($restartingInstance) {
 } elseif ("$appBacpac" -ne "") {
 
     # appBacpac and tenantBacpac specified - restore and use
+
+    if (Test-NavDatabase -DatabaseName "tenant") {
+        Remove-NavDatabase -DatabaseName "tenant"
+    }
+    if (Test-NavDatabase -DatabaseName "default") {
+        Remove-NavDatabase -DatabaseName "default"
+    }
     
     $dbName = "app"
     $appBacpac, $tenantBacpac | % {
@@ -144,14 +157,15 @@ if ($restartingInstance) {
     Set-NavServerConfiguration -serverinstance $ServerInstance -databaseCredentials $DatabaseCredentials -WarningAction SilentlyContinue
 
 } elseif ($databaseServer -eq "localhost" -and $databaseInstance -eq "SQLEXPRESS" -and $multitenant) {
-    
-    Copy-NavDatabase -SourceDatabaseName $databaseName -DestinationDatabaseName "tenant"
-    Remove-NavDatabase -DatabaseName $databaseName
-    Write-Host "Exporting Application to $DatabaseName"
-    Invoke-sqlcmd -serverinstance "$DatabaseServer\$DatabaseInstance" -Database tenant -query 'CREATE USER "NT AUTHORITY\SYSTEM" FOR LOGIN "NT AUTHORITY\SYSTEM";'
-    Export-NAVApplication -DatabaseServer $DatabaseServer -DatabaseInstance $DatabaseInstance -DatabaseName "tenant" -DestinationDatabaseName $databaseName -Force -ServiceAccount 'NT AUTHORITY\SYSTEM' | Out-Null
-    Write-Host "Removing Application from tenant"
-    Remove-NAVApplication -DatabaseServer $DatabaseServer -DatabaseInstance $DatabaseInstance -DatabaseName "tenant" -Force | Out-Null
 
+    if (!(Test-NavDatabase -DatabaseName "tenant")) {
+        Copy-NavDatabase -SourceDatabaseName $databaseName -DestinationDatabaseName "tenant"
+        Remove-NavDatabase -DatabaseName $databaseName
+        Write-Host "Exporting Application to $DatabaseName"
+        Invoke-sqlcmd -serverinstance "$DatabaseServer\$DatabaseInstance" -Database tenant -query 'CREATE USER "NT AUTHORITY\SYSTEM" FOR LOGIN "NT AUTHORITY\SYSTEM";'
+        Export-NAVApplication -DatabaseServer $DatabaseServer -DatabaseInstance $DatabaseInstance -DatabaseName "tenant" -DestinationDatabaseName $databaseName -Force -ServiceAccount 'NT AUTHORITY\SYSTEM' | Out-Null
+        Write-Host "Removing Application from tenant"
+        Remove-NAVApplication -DatabaseServer $DatabaseServer -DatabaseInstance $DatabaseInstance -DatabaseName "tenant" -Force | Out-Null
+    }
 }
 

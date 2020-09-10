@@ -1,11 +1,16 @@
-﻿$push = $true
-$RootPath = $PSScriptRoot
-$version = "0.1.0.1"
+﻿$RootPath = $PSScriptRoot
+
+. (Join-Path $RootPath "settings.ps1")
+
+$push = $true
+
 $basetags = (get-navcontainerimagetags -imageName "mcr.microsoft.com/dotnet/framework/runtime").tags | Where-Object { $_.StartsWith('4.8-20') } | Sort-Object -Descending  | Where-Object { -not $_.endswith("-1803") }
 
-#throw "go?"
+$basetags
 
-0..($basetags.Count-1) | % {
+throw "go?"
+
+0..4 | % {
     $tag = $basetags[$_]
     $dt = $tag.SubString(4,8)
     $os = $tag.SubString($tag.LastIndexOf('-')+1)
@@ -17,7 +22,6 @@ $basetags = (get-navcontainerimagetags -imageName "mcr.microsoft.com/dotnet/fram
     
     docker pull $baseimage
     $osversion = docker inspect --format "{{.OsVersion}}" $baseImage
-    $created = [DateTime]::Now.ToUniversalTime().ToString("yyyyMMddHHmm") 
     
     docker images --format "{{.Repository}}:{{.Tag}}" | % { 
         if ($_ -eq $image) 
@@ -30,10 +34,10 @@ $basetags = (get-navcontainerimagetags -imageName "mcr.microsoft.com/dotnet/fram
     
     docker build --build-arg baseimage=$baseimage `
                  --build-arg created=$created `
-                 --build-arg tag="$version" `
+                 --build-arg tag="$genericTag" `
                  --build-arg osversion="$osversion" `
                  --isolation=$isolation `
-                 --memory 8G `
+                 --memory 10G `
                  --tag $image `
                  $RootPath
     
@@ -43,7 +47,7 @@ $basetags = (get-navcontainerimagetags -imageName "mcr.microsoft.com/dotnet/fram
     Write-Host "SUCCESS"
 
     if ($push) {
-        $tags = @("mcrbusinesscentral.azurecr.io/public/dynamicsnav:$osversion-generic","mcrbusinesscentral.azurecr.io/public/dynamicsnav:$osversion-generic-$version")
+        $tags = @("mcrbusinesscentral.azurecr.io/public/dynamicsnav:$osversion-generic","mcrbusinesscentral.azurecr.io/public/dynamicsnav:$osversion-generic-$genericTag","mcrbusinesscentral.azurecr.io/public/dynamicsnav:$osversion-generic-dev","mcrbusinesscentral.azurecr.io/public/dynamicsnav:$osversion-generic-dev-$genericTag")
         $tags | ForEach-Object {
             Write-Host "Push $_"
             docker tag $image $_

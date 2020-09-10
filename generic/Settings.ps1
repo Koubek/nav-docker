@@ -1,2 +1,2 @@
-﻿$tag = "0.0.8.1"
+﻿$genericTag = "0.1.0.16"
 $created = [DateTime]::Now.ToUniversalTime().ToString("yyyyMMddHHmm")

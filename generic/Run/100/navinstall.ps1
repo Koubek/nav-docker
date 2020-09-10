@@ -1,3 +1,7 @@
+Param( 
+    [switch] $installOnly
+)
+
 Write-Host "Installing NAV"
 $startTime = [DateTime]::Now
 
@@ -29,10 +33,10 @@ Start-Service -Name $SqlBrowserServiceName -ErrorAction Ignore
 Start-Service -Name $SqlWriterServiceName -ErrorAction Ignore
 Start-Service -Name $SqlServiceName -ErrorAction Ignore
 
-InstallPrerequisite -Name "Url Rewrite" -MsiPath "$NavDvdPath\Prerequisite Components\IIS URL Rewrite Module\rewrite_2.0_rtw_x64.msi" -MsiUrl "https://download.microsoft.com/download/C/9/E/C9E8180D-4E51-40A6-A9BF-776990D8BCA9/rewrite_amd64.msi"
-InstallPrerequisite -Name "SQL Clr Types" -MsiPath "$NavDvdPath\Prerequisite Components\Microsoft Report Viewer\SQLSysClrTypes.msi" -MsiUrl "https://download.microsoft.com/download/1/3/0/13089488-91FC-4E22-AD68-5BE58BD5C014/ENU/x86/SQLSysClrTypes.msi"
-InstallPrerequisite -Name "Report Viewer" -MsiPath "$NavDvdPath\Prerequisite Components\Microsoft Report Viewer\ReportViewer.msi" -MsiUrl "https://download.microsoft.com/download/A/1/2/A129F694-233C-4C7C-860F-F73139CF2E01/ENU/x86/ReportViewer.msi"
-InstallPrerequisite -Name "OpenXML" -MsiPath "$NavDvdPath\Prerequisite Components\Open XML SDK 2.5 for Microsoft Office\OpenXMLSDKv25.msi" -MsiUrl "https://download.microsoft.com/download/5/5/3/553C731E-9333-40FB-ADE3-E02DC9643B31/OpenXMLSDKV25.msi"
+InstallPrerequisite -Name "Url Rewrite" -MsiPath "$NavDvdPath\Prerequisite Components\IIS URL Rewrite Module\rewrite_2.0_rtw_x64.msi" -MsiUrl "https://bcartifacts.azureedge.net/prerequisites/rewrite_2.0_rtw_x64.msi"
+InstallPrerequisite -Name "SQL Clr Types" -MsiPath "$NavDvdPath\Prerequisite Components\Microsoft Report Viewer\SQLSysClrTypes.msi" -MsiUrl "https://bcartifacts.azureedge.net/prerequisites/SQLSysClrTypes.msi"
+InstallPrerequisite -Name "Report Viewer" -MsiPath "$NavDvdPath\Prerequisite Components\Microsoft Report Viewer\ReportViewer.msi" -MsiUrl "https://bcartifacts.azureedge.net/prerequisites/ReportViewer.msi"
+InstallPrerequisite -Name "OpenXML" -MsiPath "$NavDvdPath\Prerequisite Components\Open XML SDK 2.5 for Microsoft Office\OpenXMLSDKv25.msi" -MsiUrl "https://bcartifacts.azureedge.net/prerequisites/OpenXMLSDKv25.msi"
 
 # start IIS services
 Write-Host "Starting Internet Information Server"
@@ -95,6 +99,7 @@ Import-Module "$serviceTierFolder\Microsoft.Dynamics.Nav.Management.psm1"
 $databaseServer = "localhost"
 $databaseInstance = "SQLEXPRESS"
 $databaseName = "CRONUS"
+$skipDb = $false
 
 # Restore CRONUS Demo database to databases folder
 if (Test-Path "$navDvdPath\SQLDemoDatabase" -PathType Container) {
@@ -106,9 +111,12 @@ if (Test-Path "$navDvdPath\SQLDemoDatabase" -PathType Container) {
     New-Item -Path $databaseFolder -itemtype Directory -ErrorAction Ignore | Out-Null
     $databaseFile = $bak.FullName
 
-    $collation = (Invoke-Sqlcmd "RESTORE HEADERONLY FROM DISK = '$databaseFile'").Collation
+    Write-Host "Determining Database Collation"
+    $collation = (Invoke-Sqlcmd -ServerInstance localhost\SQLEXPRESS -ConnectionTimeout 300 -QueryTimeOut 300 "RESTORE HEADERONLY FROM DISK = '$databaseFile'").Collation
+
     SetDatabaseServerCollation -collation $collation
-    
+
+    Write-Host "Restoring CRONUS Demo Database"
     New-NAVDatabase -DatabaseServer $databaseServer `
                     -DatabaseInstance $databaseInstance `
                     -DatabaseName "$databaseName" `
@@ -137,6 +145,7 @@ GO
 "@
         Invoke-Sqlcmd -ServerInstance localhost\SQLEXPRESS -QueryTimeOut 0 -ea Stop -Query $attachcmd
     } else {
+        $skipDb = $true
         Write-Host "Skipping restore of Cronus database"
     }
 }
@@ -193,14 +202,16 @@ New-ItemProperty -Path $registryPath -Name 'Installed' -Value 1 -Force | Out-Nul
 
 Install-NAVSipCryptoProvider
 
-if (Test-Path "$navDvdPath\SQLDemoDatabase\CommonAppData\Microsoft\Microsoft Dynamics NAV\*\Database\Cronus.flf") {
+if (!$skipDb -and ($installOnly -or (Test-Path "$navDvdPath\SQLDemoDatabase\CommonAppData\Microsoft\Microsoft Dynamics NAV\*\Database\cronus.flf"))) {
 
     Write-Host "Starting NAV Service Tier"
     Start-Service -Name $NavServiceName -WarningAction Ignore
 
-    Write-Host "Importing CRONUS license file"
-    $licensefile = (Get-Item -Path "$navDvdPath\SQLDemoDatabase\CommonAppData\Microsoft\Microsoft Dynamics NAV\*\Database\cronus.flf").FullName
-    Import-NAVServerLicense -LicenseFile $licensefile -ServerInstance $ServerInstance -Database NavDatabase -WarningAction SilentlyContinue
+    if (Test-Path "$navDvdPath\SQLDemoDatabase\CommonAppData\Microsoft\Microsoft Dynamics NAV\*\Database\cronus.flf") {
+        Write-Host "Importing CRONUS license file"
+        $licensefile = (Get-Item -Path "$navDvdPath\SQLDemoDatabase\CommonAppData\Microsoft\Microsoft Dynamics NAV\*\Database\cronus.flf").FullName
+        Import-NAVServerLicense -LicenseFile $licensefile -ServerInstance $ServerInstance -Database NavDatabase -WarningAction SilentlyContinue
+    }
 
     Write-Host "Stopping NAV Service Tier"
     Stop-Service -Name $NavServiceName -WarningAction Ignore
