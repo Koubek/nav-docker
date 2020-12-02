@@ -4,7 +4,8 @@ Param(
     [string] $artifactUrl = "",
     [switch] $includeTestToolkit,
     [switch] $includeTestLibrariesOnly,
-    [switch] $includeTestFrameworkOnly
+    [switch] $includeTestFrameworkOnly,
+    [switch] $includePerformanceToolkit
 )
 
 Set-ExecutionPolicy Unrestricted
@@ -23,7 +24,7 @@ $restartingInstance = Test-Path -Path $publicDnsNameFile -PathType Leaf
 $myStart = Join-Path $myPath "start.ps1"
 if ($PSCommandPath -ne $mystart) {
     if (Test-Path -Path $myStart) {
-        . $myStart -installOnly:$installOnly -multitenant:$multitenant -artifactUrl $artifactUrl -includeTestToolkit:$includeTestToolkit -includeTestLibrariesOnly:$includeTestLibrariesOnly -includeTestFrameworkOnly:$includeTestFrameworkOnly
+        . $myStart -installOnly:$installOnly -multitenant:$multitenant -artifactUrl $artifactUrl -includeTestToolkit:$includeTestToolkit -includeTestLibrariesOnly:$includeTestLibrariesOnly -includeTestFrameworkOnly:$includeTestFrameworkOnly -includePerformanceToolkit:$includePerformanceToolkit
         exit
     }
 }
@@ -37,7 +38,8 @@ function Get-MyFilePath([string]$FileName)
     }
 }
 
-if ((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory -lt 3221225472) {
+$cimInstance = Get-CIMInstance Win32_OperatingSystem
+if ($cimInstance.TotalVisibleMemorySize -lt 3145728) {
     throw "At least 3Gb memory needs to be available to the Container."
 }
 
@@ -261,7 +263,7 @@ try {
                             }
                         }
     
-                        "Installers", "ConfigurationPackages", "TestToolKit", "UpgradeToolKit", "Extensions", "Applications","Applications.*" | % {
+                        "Installers", "ConfigurationPackages", "TestToolKit", "UpgradeToolKit", "Extensions", "Applications","Applications.*","My" | % {
                             $appSubFolder = Join-Path $appArtifactPath $_
                             if (Test-Path "$appSubFolder" -PathType Container) {
                                 $destFolder = Join-Path $tmpFolder $_
@@ -273,12 +275,14 @@ try {
                             }
                         }
     
-                        try {
-                            Rename-Item -Path $tmpFolder -NewName 'NAVDVD'
-                        }
-                        catch {
-                            Start-Sleep -Seconds 10
-                            Rename-Item -Path $tmpFolder -NewName 'NAVDVD'
+                        while (Test-Path $tmpFolder) {
+                            try {
+                                Rename-Item -Path $tmpFolder -NewName 'NAVDVD'
+                            }
+                            catch {
+                                Write-Host "WARNING: Unable to rename temp folder, waiting 10 seconds for access..."
+                                Start-Sleep -Seconds 10
+                            }
                         }
                         $navDvdPathCreated = $true
 
@@ -331,7 +335,7 @@ try {
                 }
                 
                 if ($useNewFolder) {
-                    . (Get-MyFilePath "navinstall.ps1") -installOnly:$installOnly -includeTestToolkit:$includeTestToolkit -includeTestLibrariesOnly:$includeTestLibrariesOnly -includeTestFrameworkOnly:$includeTestFrameworkOnly @mtParam
+                    . (Get-MyFilePath "navinstall.ps1") -installOnly:$installOnly -includeTestToolkit:$includeTestToolkit -includeTestLibrariesOnly:$includeTestLibrariesOnly -includeTestFrameworkOnly:$includeTestFrameworkOnly -includePerformanceToolkit:$includePerformanceToolkit @mtParam
                 }
                 else {
                     . (Get-MyFilePath "navinstall.ps1") -installOnly:$installOnly @mtParam

@@ -158,7 +158,13 @@ $wwwRootPath = Get-WWWRootPath
 $httpPath = Join-Path $wwwRootPath "http"
 
 if ($newPublicDnsName -and $webClient -ne "N") {
-    . (Get-MyFilePath "SetupWebClient.ps1")
+    try {
+        . (Get-MyFilePath "SetupWebClient.ps1")
+    }
+    catch {
+        Write-Host "WARNING: SetupWebClient failed, retrying..."
+        . (Get-MyFilePath "SetupWebClient.ps1")
+    }
     . (Get-MyFilePath "SetupWebConfiguration.ps1")
 }
 
@@ -263,6 +269,11 @@ Microsoft recommends that you always run the latest version of our containers."
 if ("$securepassword") {
     Clear-Variable -Name "securePassword"
 }
+
+$cimInstance = Get-CIMInstance Win32_OperatingSystem
+Write-Host "Container Total Physical Memory is $(($cimInstance.TotalVisibleMemorySize/1024/1024).ToString('F1',[CultureInfo]::InvariantCulture))Gb"
+Write-Host "Container Free Physical Memory is $(($cimInstance.FreePhysicalMemory/1024/1024).ToString('F1',[CultureInfo]::InvariantCulture))Gb"
+Write-Host
 
 $timespend = [Math]::Round([DateTime]::Now.Subtract($startTime).Totalseconds)
 Write-Host "Initialization took $timespend seconds"

@@ -80,7 +80,21 @@ $licensefile = "$env:licensefile"
 
 $appBacpac = "$env:appBacpac"
 $tenantBacpac = "$env:tenantBacpac"
-$multitenant = ("$env:multitenant" -eq "Y")
+
+if ("$env:multitenant" -ne "") {
+    $multitenant = ("$env:multitenant" -eq "Y")
+}
+else {
+    try {
+        $serviceTierFolder = (Get-Item "C:\Program Files\Microsoft Dynamics NAV\*\Service").FullName
+        $CustomConfigFile =  Join-Path $ServiceTierFolder "CustomSettings.config"
+        $CustomConfig = [xml](Get-Content $CustomConfigFile)
+        $multitenant = ($customConfig.SelectSingleNode("//appSettings/add[@key='Multitenant']").Value -eq "true")
+    }
+    catch {
+        $multitenant = $false
+    }
+}
 
 if ("$appBacpac" -ne "" -and "$tenantBacpac" -ne "") {
     $multitenant = $true
@@ -143,12 +157,13 @@ if ($SqlTimeout -eq "") {
 }
 
 # Set Port overrides
-$fileSharePort          = "$env:fileSharePort"
-$managementServicesPort = "$env:managementServicesPort"
-$clientServicesPort     = "$env:clientServicesPort"
-$soapServicesPort       = "$env:soapServicesPort"
-$oDataServicesPort      = "$env:oDataServicesPort"
-$developerServicesPort  = "$env:developerServicesPort"
+$fileSharePort                 = "$env:fileSharePort"
+$managementServicesPort        = "$env:managementServicesPort"
+$clientServicesPort            = "$env:clientServicesPort"
+$soapServicesPort              = "$env:soapServicesPort"
+$oDataServicesPort             = "$env:oDataServicesPort"
+$developerServicesPort         = "$env:developerServicesPort"
+$snapshotDebuggerServicesPort  = "$env:snapshotDebuggerServicesPort"
 if ("$env:webClientPort" -ne "") {
     $webClientPort = "$env:webClientPort"
 }
@@ -161,11 +176,12 @@ if ("$fileSharePort" -eq "")          {
         $fileSharePort = "8080"
     }
 }
-if ("$managementServicesPort" -eq "") { $managementServicesPort = "7045" }
-if ("$clientServicesPort" -eq "")     { $clientServicesPort = "7046" }
-if ("$soapServicesPort" -eq "")       { $soapServicesPort   = "7047" }
-if ("$oDataServicesPort" -eq "")      { $oDataServicesPort  = "7048" }
-if ("$developerServicesPort" -eq "")  { $developerServicesPort  = "7049" }
+if ("$managementServicesPort" -eq "")       { $managementServicesPort       = "7045" }
+if ("$clientServicesPort" -eq "")           { $clientServicesPort           = "7046" }
+if ("$soapServicesPort" -eq "")             { $soapServicesPort             = "7047" }
+if ("$oDataServicesPort" -eq "")            { $oDataServicesPort            = "7048" }
+if ("$developerServicesPort" -eq "")        { $developerServicesPort        = "7049" }
+if ("$snapshotDebuggerServicesPort" -eq "") { $snapshotDebuggerServicesPort = "7083" }
 
 # Set public ports
 $publicWebClientPort = "$env:publicWebClientPort"
@@ -208,6 +224,13 @@ if ($locale)  {
 $isBcSandbox = ($env:isBcSandbox -eq "Y")
 $enableSymbolLoadingAtServerStartup = ($env:enableSymbolLoading -eq "Y")
 $enableApiServices = ($env:enableApiServices -eq "Y")
+
+if ("$env:defaultTenantHasAllowAppDatabaseWrite" -ne "") {
+    $defaultTenantHasAllowAppDatabaseWrite = $env:defaultTenantHasAllowAppDatabaseWrite -eq "Y"
+}
+else {
+    $defaultTenantHasAllowAppDatabaseWrite = !$isBcSandbox
+}
 
 $customNavSettings = "$env:customNavSettings"
 $customWebSettings = "$env:customWebSettings"

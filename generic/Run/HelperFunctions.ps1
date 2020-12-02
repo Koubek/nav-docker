@@ -326,19 +326,20 @@ function Mount-NavDatabase
     Param
     (
         [Parameter(Mandatory=$false)]
-        [string]$ServerInstance = "NAV",
+        [string] $ServerInstance = "NAV",
         [Parameter(Mandatory=$true)]
-        [string]$TenantId,
+        [string] $TenantId,
         [Parameter(Mandatory=$false)]
-        [string]$DatabaseServer = "localhost",
+        [string] $DatabaseServer = "localhost",
         [Parameter(Mandatory=$false)]
-        [string]$DatabaseInstance = "SQLEXPRESS",
+        [string] $DatabaseInstance = "SQLEXPRESS",
         [Parameter(Mandatory=$true)]
-        [string]$DatabaseName,
+        [string] $DatabaseName,
         [Parameter(Mandatory=$false)]
-        [System.Management.Automation.PSCredential]$databaseCredentials,
+        [System.Management.Automation.PSCredential] $databaseCredentials,
         [Parameter(Mandatory=$false)]
-        [string[]]$AlternateId = @()
+        [string[]] $AlternateId = @(),
+        [switch] $allowAppDatabaseWrite
     )
 
     $DatabaseServerInstance = "$DatabaseServer"
@@ -346,12 +347,12 @@ function Mount-NavDatabase
         $DatabaseServerInstance += "\$DatabaseInstance"
     }
 
-    Write-Host "Mounting Database for $TenantID on server $DatabaseServerInstance"
-    
     $Params = @{ "Force"=$true }
     if ($TenantId -eq "default") {
-        $Params += @{"AllowAppDatabaseWrite"=$true }
+        $allowAppDatabaseWrite = $defaultTenantHasAllowAppDatabaseWrite -or $allowAppDatabaseWrite
     }
+    $Params += @{"AllowAppDatabaseWrite" = $allowAppDatabaseWrite }
+    Write-Host "Mounting Database for $TenantID on server $DatabaseServerInstance with AllowAppDatabaseWrite = $allowAppDatabaseWrite"
     if ($DatabaseCredentials) {
         $Params += @{ "DatabaseCredentials"=$DatabaseCredentials }
     }
@@ -459,6 +460,30 @@ function Copy-ItemMultiDest()
     )
 
     $Destination | ForEach-Object { Microsoft.PowerShell.Management\Copy-Item $Source -Destination $_ -Confirm:$Confirm -Force:$Force -Recurse:$Recurse -ErrorAction Ignore }
+}
+
+function set-DatabaseCompatibilityLevel
+{
+    Param(
+        [Parameter(Mandatory=$false)]
+        [string]$DatabaseServer = "localhost",
+        [Parameter(Mandatory=$false)]
+        [string]$DatabaseInstance = "SQLEXPRESS",
+        [Parameter(Mandatory=$false)]
+        [string]$DatabaseName
+    )
+
+    Write-Host "Setting CompatibilityLevel for $databaseName on $databaseServer\$databaseInstance"
+    Import-Module 'sqlps'
+
+    $databaseServerInstance = $DatabaseServer
+    if ($DatabaseInstance) {
+        $databaseServerInstance += "\$DatabaseInstance"
+    }
+
+    $smoServer = New-Object Microsoft.SqlServer.Management.Smo.Server $databaseServerInstance
+    $smoServer.Databases[$databaseName].CompatibilityLevel = $smoServer.Databases['model'].CompatibilityLevel
+    $smoServer.Databases[$databaseName].Alter()
 }
 
 function Install-NAVSipCryptoProvider
@@ -785,7 +810,10 @@ function GetTestToolkitApps {
     }
 
     if ($includePerformanceToolkit) {
-        $apps += @(get-childitem -Path "C:\Applications\TestFramework\PerformanceToolkit\*.*" -recurse -filter "*.app")
+        $apps += @(get-childitem -Path "C:\Applications\TestFramework\PerformanceToolkit\*.*" -recurse -filter "*Toolkit.app")
+        if (!$includeTestFrameworkOnly) {
+            $apps += @(get-childitem -Path "C:\Applications\TestFramework\PerformanceToolkit\*.*" -recurse -filter "*.app" -exclude "*Toolkit.app")
+        }
     }
 
     $apps | % {
