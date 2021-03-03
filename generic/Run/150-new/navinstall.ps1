@@ -1,5 +1,6 @@
 Param( 
     [switch] $installOnly,
+    [switch] $filesOnly,
     [string] $appArtifactPath = "",
     [string] $platformArtifactPath = "",
     [string] $databasePath = "",
@@ -45,15 +46,27 @@ You must map a folder on the host with the DVD content to $navDvdPath"
     exit 1
 }
 
-# start the SQL Server
-Write-Host "Starting Local SQL Server"
-Start-Service -Name $SqlBrowserServiceName -ErrorAction Ignore
-Start-Service -Name $SqlWriterServiceName -ErrorAction Ignore
-Start-Service -Name $SqlServiceName -ErrorAction Ignore
+$skipDb = $filesOnly
 
-# start IIS services
-Write-Host "Starting Internet Information Server"
-Start-Service -name $IisServiceName
+
+if (!$skipDb) {
+
+    $databaseFolder = "c:\databases"
+    New-Item -Path $databaseFolder -itemtype Directory -ErrorAction Ignore | Out-Null
+
+    Set-itemproperty -path 'HKLM:\software\microsoft\microsoft sql server\mssql15.SQLEXPRESS\mssqlserver' -name DefaultData -value $databaseFolder
+    Set-itemproperty -path 'HKLM:\software\microsoft\microsoft sql server\mssql15.SQLEXPRESS\mssqlserver' -name DefaultLog -value $databaseFolder
+
+    # start the SQL Server
+    Write-Host "Starting Local SQL Server"
+    Start-Service -Name $SqlBrowserServiceName -ErrorAction Ignore
+    Start-Service -Name $SqlWriterServiceName -ErrorAction Ignore
+    Start-Service -Name $SqlServiceName -ErrorAction Ignore
+
+    # start IIS services
+    Write-Host "Starting Internet Information Server"
+    Start-Service -name $IisServiceName
+}
 
 Write-Host "Copying Service Tier Files"
 RoboCopy "$NavDvdPath\ServiceTier\Program Files" "C:\Program Files" /e /NFL /NDL /NJH /NJS /nc /ns /np | Out-Null
@@ -166,7 +179,14 @@ Start-Job -ScriptBlock { Param($runPath)
 } -ArgumentList $runPath | Out-Null
 
 Write-Host "Importing PowerShell Modules"
-Import-Module "$serviceTierFolder\Microsoft.Dynamics.Nav.Management.psm1"
+try {
+    Import-Module "$serviceTierFolder\Microsoft.Dynamics.Nav.Management.psm1"
+}
+catch {
+    Write-Host "Error: '$($_.Exception.Message)', Retrying in 10 seconds..."
+    Start-Sleep -Seconds 10
+    Import-Module "$serviceTierFolder\Microsoft.Dynamics.Nav.Management.psm1"
+}
 
 $databaseServer = "localhost"
 $databaseInstance = "SQLEXPRESS"
@@ -176,14 +196,9 @@ if ($multitenant) {
 else {
     $databaseName = "CRONUS"
 }
-$skipDb = $false
 
 # Restore CRONUS Demo database to databases folder
-if ($databasePath) {
-
-    # Restore database
-    $databaseFolder = "c:\databases"
-    New-Item -Path $databaseFolder -itemtype Directory -ErrorAction Ignore | Out-Null
+if (!$skipDb -and $databasePath) {
 
     Write-Host "Determining Database Collation from $databasePath"
     $collation = (Invoke-Sqlcmd -ServerInstance localhost\SQLEXPRESS -ConnectionTimeout 300 -QueryTimeOut 300 "RESTORE HEADERONLY FROM DISK = '$databasePath'").Collation
@@ -200,12 +215,9 @@ if ($databasePath) {
 
     Set-DatabaseCompatibilityLevel -DatabaseServer $databaseServer -DatabaseInstance $databaseInstance -DatabaseName $databaseName
 }
-elseif (Test-Path "$navDvdPath\SQLDemoDatabase" -PathType Container) {
+elseif (!$skipDb -and (Test-Path "$navDvdPath\SQLDemoDatabase" -PathType Container)) {
     $bak = (Get-ChildItem -Path "$navDvdPath\SQLDemoDatabase\CommonAppData\Microsoft\Microsoft Dynamics NAV\*\Database\*.bak")[0]
     
-    # Restore database
-    $databaseFolder = "c:\databases"
-    New-Item -Path $databaseFolder -itemtype Directory -ErrorAction Ignore | Out-Null
     $databaseFile = $bak.FullName
 
     Write-Host "Determining Database Collation"
@@ -223,7 +235,7 @@ elseif (Test-Path "$navDvdPath\SQLDemoDatabase" -PathType Container) {
 
     Set-DatabaseCompatibilityLevel -DatabaseServer $databaseServer -DatabaseInstance $databaseInstance -DatabaseName $databaseName
 }
-elseif (Test-Path "$navDvdPath\databases") {
+elseif (!$skipDb -and (Test-Path "$navDvdPath\databases")) {
 
     $multitenant = $false
     $databaseName = "CRONUS"
@@ -246,7 +258,6 @@ GO
     Invoke-Sqlcmd -ServerInstance localhost\SQLEXPRESS -QueryTimeOut 0 -ea Stop -Query $attachcmd
 
     Set-DatabaseCompatibilityLevel -DatabaseServer localhost -DatabaseInstance SQLEXPRESS -DatabaseName "$databaseName"
-
 }
 else {
     $skipDb = $true
@@ -255,12 +266,17 @@ else {
 
 $databaseName = "CRONUS"
 
-if ($multitenant -and !$SkipDb) {
-    Write-Host "Exporting Application to $DatabaseName"
-    Invoke-sqlcmd -serverinstance "$DatabaseServer\$DatabaseInstance" -Database tenant -query 'CREATE USER "NT AUTHORITY\SYSTEM" FOR LOGIN "NT AUTHORITY\SYSTEM";'
-    Export-NAVApplication -DatabaseServer $DatabaseServer -DatabaseInstance $DatabaseInstance -DatabaseName "tenant" -DestinationDatabaseName $databaseName -Force -ServiceAccount 'NT AUTHORITY\SYSTEM' | Out-Null
-    Write-Host "Removing Application from tenant"
-    Remove-NAVApplication -DatabaseServer $DatabaseServer -DatabaseInstance $DatabaseInstance -DatabaseName "tenant" -Force | Out-Null
+if (!$skipDb) {
+    if ($multitenant) {
+        Write-Host "Exporting Application to $DatabaseName"
+        Invoke-sqlcmd -serverinstance "$DatabaseServer\$DatabaseInstance" -Database tenant -query 'CREATE USER "NT AUTHORITY\SYSTEM" FOR LOGIN "NT AUTHORITY\SYSTEM";'
+        Export-NAVApplication -DatabaseServer $DatabaseServer -DatabaseInstance $DatabaseInstance -DatabaseName "tenant" -DestinationDatabaseName $databaseName -Force -ServiceAccount 'NT AUTHORITY\SYSTEM' | Out-Null
+        Write-Host "Removing Application from tenant"
+        Remove-NAVApplication -DatabaseServer $DatabaseServer -DatabaseInstance $DatabaseInstance -DatabaseName "tenant" -Force | Out-Null
+    }
+    else {
+        Invoke-Sqlcmd -ServerInstance "$DatabaseServer\$DatabaseInstance" -Database $databaseName -Query "UPDATE [dbo].[`$ndo`$tenantproperty] SET [tenantid] = 'default' WHERE [tenantid] = ''" -ErrorAction Ignore
+    }
 }
 
 Write-Host "Modifying Business Central Service Tier Config File for Docker"
@@ -283,13 +299,14 @@ if ($taskSchedulerKeyExists) {
 }
 $CustomConfig.Save($CustomConfigFile)
 
-# Creating Business Central Service
-Write-Host "Creating Business Central Service Tier"
-$serviceCredentials = New-Object System.Management.Automation.PSCredential ("NT AUTHORITY\SYSTEM", (new-object System.Security.SecureString))
 $serverFile = "$serviceTierFolder\Microsoft.Dynamics.Nav.Server.exe"
-$configFile = "$serviceTierFolder\Microsoft.Dynamics.Nav.Server.exe.config"
-New-Service -Name $NavServiceName -BinaryPathName """$serverFile"" `$$ServerInstance /config ""$configFile""" -DisplayName "Dynamics 365 Business Central Server [$ServerInstance]" -Description "$serverInstance" -StartupType manual -Credential $serviceCredentials -DependsOn @("HTTP") | Out-Null
-
+if (!$filesOnly) {
+    # Creating Business Central Service
+    Write-Host "Creating Business Central Service Tier"
+    $serviceCredentials = New-Object System.Management.Automation.PSCredential ("NT AUTHORITY\SYSTEM", (new-object System.Security.SecureString))
+    $configFile = "$serviceTierFolder\Microsoft.Dynamics.Nav.Server.exe.config"
+    New-Service -Name $NavServiceName -BinaryPathName """$serverFile"" `$$ServerInstance /config ""$configFile""" -DisplayName "Dynamics 365 Business Central Server [$ServerInstance]" -Description "$serverInstance" -StartupType manual -Credential $serviceCredentials -DependsOn @("HTTP") | Out-Null
+}
 $serverVersion = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($serverFile)
 $versionFolder = ("{0}{1}" -f $serverVersion.FileMajorPart,$serverVersion.FileMinorPart)
 $registryPath = "HKLM:\SOFTWARE\Microsoft\Microsoft Dynamics NAV\$versionFolder\Service"
@@ -337,23 +354,41 @@ if (!$skipDb -and ($multitenant -or $installOnly -or $licenseFilePath -ne "" -or
         $serviceTierFolder = (Get-Item "C:\Program Files\Microsoft Dynamics NAV\*\Service").FullName
         if (Test-Path "$serviceTierFolder\Microsoft.Dynamics.Nav.Apps.Management.psd1") {
             Import-Module "$serviceTierFolder\Microsoft.Dynamics.Nav.Apps.Management.psd1"
+
             $installApps | % {
                 $appFile = $_
-                Write-Host "Publishing $appFile"
-                Publish-NavApp -ServerInstance $ServerInstance -Path $appFile -SkipVerification
     
                 $navAppInfo = Get-NAVAppInfo -Path $appFile
                 $appPublisher = $navAppInfo.Publisher
                 $appName = $navAppInfo.Name
                 $appVersion = $navAppInfo.Version
-    
-                Write-Host "Synchronizing $appName"
-                Sync-NavTenant -ServerInstance $ServerInstance -Tenant default -Force
-                Sync-NavApp -ServerInstance $ServerInstance -Publisher $appPublisher -Name $appName -Version $appVersion -Tenant default -Mode ForceSync -force -WarningAction Ignore
 
-                Write-Host "Installing $appName"
-                Install-NavApp -ServerInstance $ServerInstance -Publisher $appPublisher -Name $appName -Version $appVersion -Tenant default
+                $syncAndInstall = $true
+                $tenantAppInfo = Get-NAVAppInfo -ServerInstance $serverInstance -Name $appName -Publisher $appPublisher -Version $appVersion -tenant default -tenantSpecificProperties
+                if ($tenantAppInfo) {
+                    if ($tenantAppInfo.IsInstalled) {
+                        Write-Host "Skipping $appName as it is already installed"
+                        $syncAndInstall = $false
+                    }
+                    else {
+                        Write-Host "$appName is already published"
+                    }
+                }
+                else {
+                    Write-Host "Publishing $appFile"
+                    Publish-NavApp -ServerInstance $ServerInstance -Path $appFile -SkipVerification
+                }
+
+                if ($syncAndInstall) {    
+                    Write-Host "Synchronizing $appName"
+                    Sync-NavTenant -ServerInstance $ServerInstance -Tenant default -Force
+                    Sync-NavApp -ServerInstance $ServerInstance -Publisher $appPublisher -Name $appName -Version $appVersion -Tenant default -Mode ForceSync -force -WarningAction Ignore
+
+                    Write-Host "Installing $appName"
+                    Install-NavApp -ServerInstance $ServerInstance -Publisher $appPublisher -Name $appName -Version $appVersion -Tenant default
+                }
             }
+
         }
     }
     
